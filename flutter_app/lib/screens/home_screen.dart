@@ -4,20 +4,17 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
+import '../app_theme.dart';
 import '../models/analyse_response.dart';
 import '../services/api_service.dart';
 import '../services/camera_service.dart';
-import '../services/radar_service.dart';
-import '../services/depth_service.dart';
 import '../services/room_map_service.dart';
 import '../services/tts_service.dart';
 import '../services/voice_service.dart';
 import '../services/realtime_service.dart';
 import '../services/sensor_monitor.dart';
-import '../widgets/status_bar.dart';
-import '../widgets/description_banner.dart';
-import '../widgets/chat_bar.dart';
 import '../widgets/floor_plan_painter.dart';
+import '../widgets/bottom_nav_bar.dart';
 import 'settings_screen.dart';
 import 'navigation_map_screen.dart';
 import 'room_map_screen.dart';
@@ -31,34 +28,29 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen>
     with SingleTickerProviderStateMixin {
-  // ── Core state ────────────────────────────────────────────────────────────
   bool _running = false;
   bool _loading = false;
   bool _cameraReady = false;
   String _mode = 'indoor';
   AnalyseResponse? _lastResult;
   String? _errorMsg;
-  String _cameraInitMsg = 'Initialising camera...';
+  String _cameraInitMsg = 'Initialising camera…';
 
-  // Real-time AI mode (WebSocket frames instead of HTTP timer)
   bool _realtimeMode = false;
   Timer? _rtFrameTimer;
   bool _rtFrameBusy = false;
   StreamSubscription? _rtSub;
 
-  // Sensor monitor (always local, no network) — toggled independently
   bool _sensorActive = false;
   SensorAlert? _currentSensorAlert;
   StreamSubscription? _sensorSub;
 
-  // Voice
   bool _voiceEnabled = false;
   bool _voiceListening = false;
   bool _voiceProcessing = false;
   String _voiceStatus = '';
   String _voicePartial = '';
 
-  // Mic pulse animation
   late AnimationController _micPulse;
   late Animation<double> _micScale;
 
@@ -73,7 +65,6 @@ class _HomeScreenState extends State<HomeScreen>
       CurvedAnimation(parent: _micPulse, curve: Curves.easeInOut),
     );
     _micPulse.stop();
-
     _initCamera();
     VoiceService.init();
   }
@@ -91,8 +82,6 @@ class _HomeScreenState extends State<HomeScreen>
     super.dispose();
   }
 
-  // ── Camera init ───────────────────────────────────────────────────────────
-
   Future<void> _initCamera() async {
     try {
       await CameraService.init();
@@ -100,15 +89,12 @@ class _HomeScreenState extends State<HomeScreen>
     } catch (e) {
       if (mounted) {
         setState(() {
-          _cameraInitMsg =
-              'Camera unavailable: $e\n\nYou can still use the chat bar.';
+          _cameraInitMsg = 'Camera unavailable: $e\n\nYou can still use the chat bar.';
           _cameraReady = false;
         });
       }
     }
   }
-
-  // ── Start / Stop ──────────────────────────────────────────────────────────
 
   void _toggleRunning() {
     if (_running) {
@@ -121,32 +107,19 @@ class _HomeScreenState extends State<HomeScreen>
   void _startAll() {
     setState(() {
       _running = true;
-      _loading = !_realtimeMode; // RT mode shows results as they arrive
+      _loading = !_realtimeMode;
       _errorMsg = null;
     });
-
-    // ── AI analysis ──
     if (_realtimeMode) {
       _startRealtimeFrames();
     } else {
       CameraService.start(
         _mode,
         onResult: (result) {
-          if (mounted) {
-            setState(() {
-              _lastResult = result;
-              _loading = false;
-              _errorMsg = null;
-            });
-          }
+          if (mounted) setState(() { _lastResult = result; _loading = false; _errorMsg = null; });
         },
         onError: (err) {
-          if (mounted) {
-            setState(() {
-              _loading = false;
-              _errorMsg = err;
-            });
-          }
+          if (mounted) setState(() { _loading = false; _errorMsg = err; });
         },
       );
     }
@@ -157,10 +130,7 @@ class _HomeScreenState extends State<HomeScreen>
       SensorMonitor.stop();
       _sensorSub?.cancel();
       _sensorSub = null;
-      setState(() {
-        _sensorActive = false;
-        _currentSensorAlert = null;
-      });
+      setState(() { _sensorActive = false; _currentSensorAlert = null; });
     } else {
       SensorMonitor.start();
       _sensorSub = SensorMonitor.alerts.listen(_onSensorAlert);
@@ -169,7 +139,6 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   void _stopAll() {
-    // Stop AI
     if (_realtimeMode) {
       _rtFrameTimer?.cancel();
       _rtFrameTimer = null;
@@ -179,33 +148,21 @@ class _HomeScreenState extends State<HomeScreen>
     } else {
       CameraService.stop();
     }
-
-    if (mounted) {
-      setState(() {
-        _running = false;
-        _loading = false;
-      });
-    }
+    if (mounted) setState(() { _running = false; _loading = false; });
   }
-
-  // ── Mode toggle ───────────────────────────────────────────────────────────
 
   void _toggleMode() {
     if (_running) _stopAll();
     setState(() => _mode = _mode == 'indoor' ? 'outdoor' : 'indoor');
   }
 
-  // ── Real-time AI mode ─────────────────────────────────────────────────────
-
   Future<void> _switchToRealtimeMode(bool on) async {
     if (on == _realtimeMode) return;
     if (_running) _stopAll();
-
     if (on) {
       await RealtimeService.connect(ApiService.baseUrl);
       if (!RealtimeService.isConnected) {
-        setState(() => _errorMsg =
-            'WebSocket failed. Check backend URL in Settings.');
+        setState(() => _errorMsg = 'WebSocket failed. Check backend URL in Settings.');
         return;
       }
       await TtsService.speak('Real-time mode on.');
@@ -216,30 +173,17 @@ class _HomeScreenState extends State<HomeScreen>
     setState(() => _realtimeMode = on);
   }
 
-  /// Sends camera frames to the WebSocket for continuous AI analysis.
-  /// Sensor warnings are handled independently by SensorMonitor.
   void _startRealtimeFrames() {
     _rtSub?.cancel();
     _rtSub = RealtimeService.results.listen(_onRealtimeMessage);
-
-    // Frame every 1.5 s — skipped server-side if AI is still busy
-    _rtFrameTimer =
-        Timer.periodic(const Duration(milliseconds: 1500), (_) async {
+    _rtFrameTimer = Timer.periodic(const Duration(milliseconds: 1500), (_) async {
       if (!_running || _rtFrameBusy) return;
-      if (CameraService.controller == null ||
-          !CameraService.controller!.value.isInitialized) {
-        return;
-      }
+      if (CameraService.controller == null || !CameraService.controller!.value.isInitialized) return;
       _rtFrameBusy = true;
       try {
         final file = await CameraService.controller!.takePicture();
-        final bytes = kIsWeb
-            ? await file.readAsBytes()
-            : await File(file.path).readAsBytes();
-        RealtimeService.sendFrame(
-          imageBase64: base64Encode(bytes),
-          mode: _mode,
-        );
+        final bytes = kIsWeb ? await file.readAsBytes() : await File(file.path).readAsBytes();
+        RealtimeService.sendFrame(imageBase64: base64Encode(bytes), mode: _mode);
       } catch (_) {
         _rtFrameBusy = false;
       }
@@ -249,49 +193,30 @@ class _HomeScreenState extends State<HomeScreen>
   void _onRealtimeMessage(Map<String, dynamic> msg) {
     if (!mounted) return;
     final type = msg['type'] as String?;
-
     switch (type) {
       case 'analyse_result':
         _rtFrameBusy = false;
         try {
           final result = AnalyseResponse.fromJson(msg);
-          TtsService.speak(result.description); // sensor alerts already handle warnings
-          if (result.textDetected != null &&
-              result.textDetected!.trim().isNotEmpty &&
-              result.textDetected!.toLowerCase() != 'null') {
-            Future.delayed(const Duration(milliseconds: 800), () {
-              TtsService.speak('I can see text: ${result.textDetected}');
-            });
+          TtsService.speak(result.description);
+          if (result.textDetected != null && result.textDetected!.trim().isNotEmpty && result.textDetected!.toLowerCase() != 'null') {
+            Future.delayed(const Duration(milliseconds: 800), () => TtsService.speak('I can see text: ${result.textDetected}'));
           }
-          setState(() {
-            _lastResult = result;
-            _loading = false;
-          });
-        } catch (_) {
-          _rtFrameBusy = false;
-        }
+          setState(() { _lastResult = result; _loading = false; });
+        } catch (_) { _rtFrameBusy = false; }
 
       case 'snapshot_result':
         _voiceProcessing = false;
         final answer = msg['answer'] as String? ?? 'No answer available.';
         TtsService.speak(answer);
-        setState(() {
-          _voiceStatus =
-              answer.length > 60 ? '${answer.substring(0, 57)}...' : answer;
-        });
-        if (_voiceEnabled) {
-          Future.delayed(const Duration(milliseconds: 800), _startListening);
-        }
+        setState(() { _voiceStatus = answer.length > 60 ? '${answer.substring(0, 57)}...' : answer; });
+        if (_voiceEnabled) Future.delayed(const Duration(milliseconds: 800), _startListening);
 
       case 'skipped':
         _rtFrameBusy = false;
 
       case 'disconnected':
-        setState(() {
-          _realtimeMode = false;
-          _running = false;
-          _errorMsg = 'Real-time connection lost. Tap ⚡ to reconnect.';
-        });
+        setState(() { _realtimeMode = false; _running = false; _errorMsg = 'Real-time connection lost. Tap ⚡ to reconnect.'; });
 
       case 'error':
         _rtFrameBusy = false;
@@ -299,33 +224,20 @@ class _HomeScreenState extends State<HomeScreen>
     }
   }
 
-  // ── Sensor monitor callback ───────────────────────────────────────────────
-
   void _onSensorAlert(SensorAlert? alert) {
     if (mounted) setState(() => _currentSensorAlert = alert);
   }
-
-  // ── Voice control ─────────────────────────────────────────────────────────
 
   void _toggleVoice() async {
     if (_voiceListening || _voiceEnabled) {
       await VoiceService.stop();
       _micPulse.stop();
-      setState(() {
-        _voiceListening = false;
-        _voiceEnabled = false;
-        _voiceStatus = '';
-        _voicePartial = '';
-      });
+      setState(() { _voiceListening = false; _voiceEnabled = false; _voiceStatus = ''; _voicePartial = ''; });
       await TtsService.speak('Voice off.');
     } else {
       if (!VoiceService.isAvailable) {
         final ok = await VoiceService.init();
-        if (!ok) {
-          setState(
-              () => _errorMsg = 'Speech recognition unavailable on this device.');
-          return;
-        }
+        if (!ok) { setState(() => _errorMsg = 'Speech recognition unavailable on this device.'); return; }
       }
       setState(() => _voiceEnabled = true);
       await TtsService.speak('Voice on.');
@@ -336,17 +248,10 @@ class _HomeScreenState extends State<HomeScreen>
 
   void _startListening() {
     if (!_voiceEnabled || _voiceListening || _voiceProcessing) return;
-    setState(() {
-      _voiceListening = true;
-      _voiceStatus = 'Listening...';
-      _voicePartial = '';
-    });
+    setState(() { _voiceListening = true; _voiceStatus = 'Listening...'; _voicePartial = ''; });
     _micPulse.repeat(reverse: true);
-
     VoiceService.startListening(
-      onPartial: (w) {
-        if (mounted) setState(() => _voicePartial = w);
-      },
+      onPartial: (w) { if (mounted) setState(() => _voicePartial = w); },
       onFinal: (w) {
         _micPulse.stop();
         if (mounted) setState(() => _voiceListening = false);
@@ -354,15 +259,8 @@ class _HomeScreenState extends State<HomeScreen>
       },
       onDone: () {
         _micPulse.stop();
-        if (mounted) {
-          setState(() {
-            _voiceListening = false;
-            if (_voicePartial.isEmpty) _voiceStatus = 'Tap mic to speak';
-          });
-        }
-        if (_voiceEnabled && !_voiceProcessing) {
-          Future.delayed(const Duration(milliseconds: 300), _startListening);
-        }
+        if (mounted) setState(() { _voiceListening = false; if (_voicePartial.isEmpty) _voiceStatus = 'Tap mic to speak'; });
+        if (_voiceEnabled && !_voiceProcessing) Future.delayed(const Duration(milliseconds: 300), _startListening);
       },
     );
   }
@@ -370,53 +268,35 @@ class _HomeScreenState extends State<HomeScreen>
   void _handleVoiceResult(String words) async {
     if (words.trim().isEmpty) return;
     final (cmd, question) = VoiceService.parseCommand(words);
-
     switch (cmd) {
       case VoiceCommand.start:
         setState(() => _voiceStatus = 'Starting...');
         await TtsService.speak('Starting.');
         if (!_running) _startAll();
-
       case VoiceCommand.stop:
         setState(() => _voiceStatus = 'Stopping...');
         await TtsService.speak('Stopping.');
         if (_running) _stopAll();
-
       case VoiceCommand.indoor:
         setState(() => _voiceStatus = 'Indoor mode.');
         await TtsService.speak('Indoor mode.');
         if (_mode != 'indoor') _toggleMode();
-
       case VoiceCommand.outdoor:
         setState(() => _voiceStatus = 'Outdoor mode.');
         await TtsService.speak('Outdoor mode.');
         if (_mode != 'outdoor') _toggleMode();
-
       case VoiceCommand.openMap:
         setState(() => _voiceStatus = 'Opening room map...');
         await TtsService.speak('Opening room map.');
-        if (mounted) {
-          Navigator.push(context,
-              MaterialPageRoute(builder: (_) => RoomMapScreen(mode: _mode)));
-        }
-
+        if (mounted) Navigator.push(context, MaterialPageRoute(builder: (_) => RoomMapScreen(mode: _mode)));
       case VoiceCommand.question:
-        setState(() {
-          _voiceStatus = question ?? words;
-          _voiceProcessing = true;
-        });
+        setState(() { _voiceStatus = question ?? words; _voiceProcessing = true; });
         await TtsService.speak('Let me look...');
         await _takeSnapshot(question ?? words);
-
       case VoiceCommand.none:
-        if (_voiceEnabled) {
-          Future.delayed(const Duration(milliseconds: 300), _startListening);
-        }
+        if (_voiceEnabled) Future.delayed(const Duration(milliseconds: 300), _startListening);
     }
-
-    if (cmd != VoiceCommand.question &&
-        cmd != VoiceCommand.none &&
-        _voiceEnabled) {
+    if (cmd != VoiceCommand.question && cmd != VoiceCommand.none && _voiceEnabled) {
       Future.delayed(const Duration(milliseconds: 800), _startListening);
     }
   }
@@ -425,49 +305,39 @@ class _HomeScreenState extends State<HomeScreen>
     if (!_cameraReady || CameraService.controller == null) {
       await TtsService.speak('Camera not ready.');
       setState(() => _voiceProcessing = false);
-      if (_voiceEnabled) {
-        Future.delayed(const Duration(milliseconds: 800), _startListening);
-      }
+      if (_voiceEnabled) Future.delayed(const Duration(milliseconds: 800), _startListening);
       return;
     }
     try {
       final file = await CameraService.controller!.takePicture();
-      final bytes = kIsWeb
-          ? await file.readAsBytes()
-          : await File(file.path).readAsBytes();
+      final bytes = kIsWeb ? await file.readAsBytes() : await File(file.path).readAsBytes();
       final b64 = base64Encode(bytes);
-
       if (_realtimeMode && RealtimeService.isConnected) {
-        RealtimeService.sendSnapshot(
-            imageBase64: b64, mode: _mode, question: question);
-        // Result handled in _onRealtimeMessage
+        RealtimeService.sendSnapshot(imageBase64: b64, mode: _mode, question: question);
       } else {
-        // Run analyse + chat concurrently where possible:
-        // analyse gives visual context; chat wraps it with the question.
         final analyse = await ApiService.analyse(b64, _mode);
         final ctx = analyse?.description ?? '';
-        final answer = ctx.isNotEmpty
-            ? (await ApiService.chat([], context: '$ctx\nUser asked: $question') ??
-                ctx)
-            : 'I could not see anything clearly.';
+        final answer = ctx.isNotEmpty ? (await ApiService.chat([], context: '$ctx\nUser asked: $question') ?? ctx) : 'I could not see anything clearly.';
         await TtsService.speak(answer);
-        if (mounted) {
-          setState(() {
-            _voiceStatus =
-                answer.length > 60 ? '${answer.substring(0, 57)}...' : answer;
-            _voiceProcessing = false;
-          });
-        }
-        if (_voiceEnabled) {
-          Future.delayed(const Duration(milliseconds: 600), _startListening);
-        }
+        if (mounted) setState(() { _voiceStatus = answer.length > 60 ? '${answer.substring(0, 57)}...' : answer; _voiceProcessing = false; });
+        if (_voiceEnabled) Future.delayed(const Duration(milliseconds: 600), _startListening);
       }
     } catch (e) {
       await TtsService.speak('Could not capture image.');
       setState(() => _voiceProcessing = false);
-      if (_voiceEnabled) {
-        Future.delayed(const Duration(milliseconds: 800), _startListening);
-      }
+      if (_voiceEnabled) Future.delayed(const Duration(milliseconds: 800), _startListening);
+    }
+  }
+
+  void _navigateTo(NavTab tab) {
+    switch (tab) {
+      case NavTab.home: break;
+      case NavTab.navigate:
+        Navigator.push(context, MaterialPageRoute(builder: (_) => NavigationMapScreen(mode: _mode)));
+      case NavTab.roomMap:
+        Navigator.push(context, MaterialPageRoute(builder: (_) => RoomMapScreen(mode: _mode))).then((_) => setState(() {}));
+      case NavTab.settings:
+        Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen()));
     }
   }
 
@@ -476,372 +346,226 @@ class _HomeScreenState extends State<HomeScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: AppColors.background,
       appBar: _buildAppBar(),
       body: Column(
         children: [
-          // Camera preview + overlays
-          Expanded(flex: 55, child: _buildCameraPreview()),
+          // Camera view
+          _buildCameraSection(),
 
-          // Sensor bar — visible when sensor monitor is active
-          if (_sensorActive) _buildSensorBar(),
-
-          // Voice status strip
-          if (_voiceEnabled) _buildVoiceStrip(),
-
-          // Status bar
-          StatusBarWidget(
-            mode: _mode,
-            running: _running,
-            onToggle: _cameraReady ? _toggleRunning : () {},
-            onModeToggle: _toggleMode,
-            realtimeMode: _realtimeMode,
-            sensorActive: _sensorActive,
-            onSensorToggle: _toggleSensorMonitor,
-          ),
-
-          // Description banner (AI scene output)
-          DescriptionBanner(result: _lastResult, loading: _loading),
-
-          // Error banner
-          if (_errorMsg != null)
-            Container(
-              color: Colors.red[900],
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              width: double.infinity,
-              child: Row(
-                children: [
-                  const Icon(Icons.error_outline,
-                      color: Colors.white, size: 16),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(_errorMsg!,
-                        style: const TextStyle(
-                            color: Colors.white, fontSize: 12),
-                        maxLines: 3),
-                  ),
-                  GestureDetector(
-                    onTap: () => setState(() => _errorMsg = null),
-                    child: const Icon(Icons.close,
-                        color: Colors.white54, size: 16),
-                  ),
-                ],
+          // Sensor & status area
+          Expanded(
+            child: Container(
+              decoration: const BoxDecoration(
+                color: AppColors.surfaceContainerLowest,
+                borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+                boxShadow: [BoxShadow(color: Color(0x1A000000), blurRadius: 16, offset: Offset(0, -4))],
+              ),
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  children: [
+                    _buildDistanceBar(),
+                    const SizedBox(height: 8),
+                    if (_voiceEnabled) _buildVoiceStrip(),
+                    if (_voiceEnabled) const SizedBox(height: 8),
+                    _buildActionBar(),
+                    const SizedBox(height: 8),
+                    _buildDescriptionBanner(),
+                    if (_errorMsg != null) ...[const SizedBox(height: 8), _buildErrorBanner()],
+                  ],
+                ),
               ),
             ),
-
-          // Chat bar
-          ChatBar(lastDescription: _lastResult?.description),
+          ),
         ],
+      ),
+      bottomNavigationBar: AppBottomNavBar(
+        current: NavTab.home,
+        onTap: _navigateTo,
       ),
     );
   }
-
-  // ── AppBar ────────────────────────────────────────────────────────────────
 
   AppBar _buildAppBar() {
     return AppBar(
-      backgroundColor: Colors.black,
-      foregroundColor: Colors.white,
-      title: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Text('VisionAid',
-              style:
-                  TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1)),
-          if (_realtimeMode) ...[
-            const SizedBox(width: 8),
-            Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(
-                color: Colors.green.withValues(alpha: 0.2),
-                borderRadius: BorderRadius.circular(4),
-                border: Border.all(color: Colors.green.withValues(alpha: 0.5)),
-              ),
-              child: const Text('LIVE',
-                  style: TextStyle(
-                      color: Colors.green,
-                      fontSize: 10,
-                      fontWeight: FontWeight.bold)),
-            ),
-          ],
-        ],
+      leading: IconButton(
+        icon: const Icon(Icons.visibility, color: AppColors.primaryContainer),
+        onPressed: () => _switchToRealtimeMode(!_realtimeMode),
+        tooltip: _realtimeMode ? 'Disable real-time AI' : 'Enable real-time AI',
       ),
+      title: const Text('VisionAid'),
       actions: [
         IconButton(
-          tooltip: _realtimeMode ? 'Disable real-time AI' : 'Enable real-time AI',
-          icon: Icon(Icons.bolt,
-              color: _realtimeMode ? Colors.green : Colors.white38),
-          onPressed: () => _switchToRealtimeMode(!_realtimeMode),
-        ),
-        IconButton(
-          tooltip: 'Room Map',
-          icon: const Icon(Icons.grid_view_outlined, color: Colors.green),
-          onPressed: () => Navigator.push(context,
-                  MaterialPageRoute(builder: (_) => RoomMapScreen(mode: _mode)))
-              .then((_) => setState(() {})),
-        ),
-        if (RadarService.hasRadar || DepthService.hasDepth)
-          IconButton(
-            tooltip: 'Navigation Map',
-            icon: const Icon(Icons.map_outlined, color: Colors.green),
-            onPressed: () => Navigator.push(context,
-                MaterialPageRoute(
-                    builder: (_) => NavigationMapScreen(mode: _mode))),
-          ),
-        IconButton(
-          icon: const Icon(Icons.settings),
-          onPressed: () => Navigator.push(context,
-              MaterialPageRoute(builder: (_) => const SettingsScreen())),
+          icon: const Icon(Icons.sos_outlined, color: AppColors.primaryContainer),
+          onPressed: () {},
+          tooltip: 'Emergency',
         ),
       ],
+      bottom: PreferredSize(
+        preferredSize: const Size.fromHeight(2),
+        child: Container(height: 2, color: const Color(0xFFE2E8F0)),
+      ),
     );
   }
 
-  // ── Camera preview ────────────────────────────────────────────────────────
+  Widget _buildCameraSection() {
+    return AspectRatio(
+      aspectRatio: 4 / 3,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          _buildCameraPreview(),
+
+          // LIVE badge
+          if (_realtimeMode && _running)
+            Positioned(
+              top: 12,
+              right: 12,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.6),
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        color: AppColors.error,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    const Text(
+                      'LIVE',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontFamily: 'Lexend',
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 1.5,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+          // Mini-map bottom-left
+          Positioned(
+            bottom: 12,
+            left: 12,
+            child: GestureDetector(
+              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => RoomMapScreen(mode: _mode))).then((_) => setState(() {})),
+              child: Container(
+                width: 96,
+                height: 96,
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceContainerLowest,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppColors.primaryContainer, width: 2),
+                  boxShadow: const [BoxShadow(color: Color(0x4D000000), blurRadius: 12, offset: Offset(0, 4))],
+                ),
+                child: RoomMapService.allPoints.isEmpty
+                    ? const Icon(Icons.map_outlined, color: AppColors.primaryContainer, size: 36)
+                    : MiniMapWidget(points: RoomMapService.allPoints, size: 96, onTap: () {}),
+              ),
+            ),
+          ),
+
+          // Mic FAB bottom-right
+          Positioned(
+            bottom: 12,
+            right: 12,
+            child: _buildMicButton(),
+          ),
+
+          // Loading overlay
+          if (_loading && !_realtimeMode)
+            Container(
+              color: Colors.black.withValues(alpha: 0.4),
+              child: const Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    CircularProgressIndicator(color: Colors.white),
+                    SizedBox(height: 10),
+                    Text('Analysing scene…', style: TextStyle(color: Colors.white, fontSize: 14, fontFamily: 'Lexend')),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
 
   Widget _buildCameraPreview() {
     if (!_cameraReady || CameraService.controller == null) {
       return Container(
-        color: Colors.grey[900],
+        color: Colors.black,
         child: Center(
           child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Text(_cameraInitMsg,
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.white54, fontSize: 14)),
+            padding: const EdgeInsets.all(24),
+            child: Text(
+              _cameraInitMsg,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.white54, fontSize: 15, fontFamily: 'Lexend'),
+            ),
           ),
         ),
       );
     }
-
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        CameraPreview(CameraService.controller!),
-
-        // Mini floor-plan — bottom-left
-        Positioned(
-          bottom: 10,
-          left: 10,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              MiniMapWidget(
-                points: RoomMapService.allPoints,
-                size: 100,
-                onTap: () => Navigator.push(context,
-                        MaterialPageRoute(
-                            builder: (_) => RoomMapScreen(mode: _mode)))
-                    .then((_) => setState(() {})),
-              ),
-              const SizedBox(height: 2),
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                decoration: BoxDecoration(
-                    color: Colors.black54,
-                    borderRadius: BorderRadius.circular(4)),
-                child: Text(
-                  RoomMapService.completedScans == 0
-                      ? 'Map room'
-                      : MiniMapWidget.coverageLabel(
-                          RoomMapService.completedScans,
-                          RoomMapService.requiredScans),
-                  style: const TextStyle(color: Colors.white54, fontSize: 9),
-                ),
-              ),
-            ],
-          ),
-        ),
-
-        // Mic button — bottom-right
-        Positioned(bottom: 10, right: 10, child: _buildMicButton()),
-
-        // LIVE badge — top-right when streaming
-        if (_realtimeMode && _running)
-          Positioned(
-            top: 8,
-            right: 8,
-            child: Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: Colors.red.withValues(alpha: 0.85),
-                borderRadius: BorderRadius.circular(4),
-              ),
-              child: const Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.fiber_manual_record,
-                      color: Colors.white, size: 8),
-                  SizedBox(width: 4),
-                  Text('LIVE',
-                      style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 11,
-                          fontWeight: FontWeight.bold)),
-                ],
-              ),
-            ),
-          ),
-
-        // AI loading overlay (timer mode only)
-        if (_loading && !_realtimeMode)
-          Container(
-            color: Colors.black38,
-            child: const Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  CircularProgressIndicator(color: Colors.green),
-                  SizedBox(height: 10),
-                  Text('Analysing scene...',
-                      style: TextStyle(color: Colors.white, fontSize: 14)),
-                ],
-              ),
-            ),
-          ),
-      ],
-    );
+    return CameraPreview(CameraService.controller!);
   }
 
-  // ── Sensor bar ────────────────────────────────────────────────────────────
-
-  Widget _buildSensorBar() {
+  Widget _buildDistanceBar() {
     final alert = _currentSensorAlert;
-    final isSim = SensorMonitor.simulationActive;
-    final hasHardware = RadarService.hasRadar || DepthService.hasDepth;
-
-    // Colours based on alert level
-    final Color bg;
-    final Color fg;
-    final IconData icon;
-    final String mainText;
-
-    if (alert == null) {
-      bg = const Color(0xFF0A2A0A);
-      fg = Colors.green;
-      icon = Icons.sensors;
-      mainText = 'Clear';
-    } else {
-      switch (alert.level) {
-        case AlertLevel.danger:
-          bg = Colors.red[900]!;
-          fg = Colors.white;
-          icon = Icons.warning_amber_rounded;
-        case AlertLevel.caution:
-          bg = Colors.orange[900]!;
-          fg = Colors.white;
-          icon = Icons.sensors;
-        case AlertLevel.info:
-          bg = const Color(0xFF1A1400);
-          fg = Colors.yellow;
-          icon = Icons.sensors;
-        default:
-          bg = Colors.grey[900]!;
-          fg = Colors.white54;
-          icon = Icons.sensors;
-      }
-      mainText = alert.message;
-    }
-
-    // Distance fill bar (0–300 cm → 0–1, inverted so closer = more filled)
-    final distCm = alert?.distanceCm ?? 300.0;
-    final fillFraction = ((300.0 - distCm.clamp(0.0, 300.0)) / 300.0);
+    final distText = alert != null ? '${alert.distanceCm.toInt()} cm' : '> 5m';
+    final statusText = alert != null ? alert.message : 'Clear Path';
+    final isAlert = alert != null;
 
     return Container(
-      color: bg,
-      padding: const EdgeInsets.fromLTRB(12, 5, 12, 5),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: isAlert ? AppColors.error : AppColors.outlineVariant),
+      ),
+      child: Row(
         children: [
-          Row(
-            children: [
-              // Sensor icon
-              Icon(icon, color: fg, size: 16),
-              const SizedBox(width: 8),
-
-              // Main message
-              Expanded(
-                child: Text(
-                  mainText,
-                  style: TextStyle(
-                      color: fg,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 13),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-
-              // Source / distance badge
-              if (alert != null)
-                Container(
-                  margin: const EdgeInsets.only(left: 6),
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: fg.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: Text(
-                    '${distCm.toInt()} cm',
-                    style: TextStyle(
-                        color: fg, fontSize: 11, fontWeight: FontWeight.bold),
-                  ),
-                ),
-
-              // SIM / HW badge + toggle
-              const SizedBox(width: 6),
-              GestureDetector(
-                onTap: () {
-                  SensorMonitor.toggleSimulation();
-                  setState(() {});
-                },
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 7, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: isSim
-                        ? Colors.amber.withValues(alpha: 0.25)
-                        : Colors.green.withValues(alpha: 0.25),
-                    borderRadius: BorderRadius.circular(4),
-                    border: Border.all(
-                      color: isSim
-                          ? Colors.amber.withValues(alpha: 0.7)
-                          : Colors.green.withValues(alpha: 0.7),
-                    ),
-                  ),
-                  child: Text(
-                    isSim
-                        ? (hasHardware ? 'SIM' : 'SIM ⚙')
-                        : 'HW',
-                    style: TextStyle(
-                      color: isSim ? Colors.amber : Colors.green,
-                      fontSize: 10,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-              ),
-            ],
+          Icon(
+            Icons.radar,
+            color: isAlert ? AppColors.error : AppColors.onSurfaceVariant,
+            size: 22,
           ),
-
-          // Distance fill bar
-          const SizedBox(height: 4),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(2),
-            child: LinearProgressIndicator(
-              value: fillFraction,
-              minHeight: 3,
-              backgroundColor: fg.withValues(alpha: 0.12),
-              valueColor: AlwaysStoppedAnimation<Color>(
-                alert?.level == AlertLevel.danger
-                    ? Colors.red
-                    : alert?.level == AlertLevel.caution
-                        ? Colors.orange
-                        : Colors.green,
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              statusText,
+              style: const TextStyle(
+                fontFamily: 'Lexend',
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.5,
+                color: AppColors.onSurfaceVariant,
+              ),
+            ),
+          ),
+          GestureDetector(
+            onTap: _toggleSensorMonitor,
+            child: Text(
+              distText,
+              style: TextStyle(
+                fontFamily: 'PublicSans',
+                fontSize: 22,
+                fontWeight: FontWeight.w600,
+                color: isAlert ? AppColors.error : AppColors.primaryContainer,
               ),
             ),
           ),
@@ -850,110 +574,237 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  // ── Mic button ────────────────────────────────────────────────────────────
+  Widget _buildVoiceStrip() {
+    final isListening = _voiceListening;
+    final isProcessing = _voiceProcessing;
+    final text = isProcessing
+        ? (_voiceStatus.isNotEmpty ? _voiceStatus : 'Processing…')
+        : isListening
+            ? (_voicePartial.isNotEmpty ? '"$_voicePartial"' : 'Listening for command…')
+            : (_voiceStatus.isNotEmpty ? _voiceStatus : 'Listening for command…');
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.primaryFixed,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppColors.primaryFixedDim),
+      ),
+      child: Row(
+        children: [
+          // Animated waveform
+          SizedBox(
+            width: 32,
+            height: 24,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: List.generate(5, (i) {
+                final heights = [12.0, 20.0, 16.0, 24.0, 12.0];
+                return AnimatedContainer(
+                  duration: Duration(milliseconds: 300 + i * 80),
+                  width: 4,
+                  height: (isListening || isProcessing) ? heights[i] : 6.0,
+                  decoration: BoxDecoration(
+                    color: AppColors.primaryContainer,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                );
+              }),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              text,
+              style: const TextStyle(
+                fontFamily: 'Lexend',
+                fontSize: 16,
+                color: AppColors.onPrimaryFixed,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildActionBar() {
+    return Row(
+      children: [
+        // Indoor / Outdoor toggle
+        Container(
+          padding: const EdgeInsets.all(4),
+          decoration: BoxDecoration(
+            color: AppColors.surfaceContainerHigh,
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: AppColors.outlineVariant),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: ['indoor', 'outdoor'].map((m) {
+              final active = _mode == m;
+              return GestureDetector(
+                onTap: () { if (!active) _toggleMode(); },
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 150),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: active ? AppColors.surfaceContainerLowest : Colors.transparent,
+                    borderRadius: BorderRadius.circular(999),
+                    boxShadow: active ? [const BoxShadow(color: Color(0x1A000000), blurRadius: 4)] : null,
+                  ),
+                  child: Text(
+                    m[0].toUpperCase() + m.substring(1),
+                    style: TextStyle(
+                      fontFamily: 'Lexend',
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 0.5,
+                      color: active ? AppColors.primaryContainer : AppColors.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+        ),
+        const SizedBox(width: 12),
+
+        // START / STOP NAV button
+        Expanded(
+          child: SizedBox(
+            height: 56,
+            child: ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _running ? AppColors.tertiaryContainer : AppColors.primaryContainer,
+                foregroundColor: AppColors.onPrimary,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                elevation: 2,
+                shadowColor: AppColors.primaryContainer.withValues(alpha: 0.4),
+              ),
+              onPressed: _cameraReady ? _toggleRunning : null,
+              icon: Icon(_running ? Icons.stop : Icons.play_arrow, size: 24),
+              label: Text(
+                _running ? 'STOP' : 'START NAV',
+                style: const TextStyle(
+                  fontFamily: 'PublicSans',
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildDescriptionBanner() {
+    final description = _lastResult?.description;
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceContainer,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppColors.outlineVariant),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Padding(
+            padding: EdgeInsets.only(top: 2),
+            child: Icon(Icons.visibility_outlined, color: AppColors.primaryContainer, size: 22),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              description ?? '"You are in a well-lit environment. Start navigation to analyse your surroundings."',
+              style: const TextStyle(
+                fontFamily: 'Lexend',
+                fontSize: 18,
+                height: 1.5,
+                color: AppColors.onSurface,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildErrorBanner() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: AppColors.errorContainer,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppColors.error.withValues(alpha: 0.4)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.error_outline, color: AppColors.error, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              _errorMsg!,
+              style: const TextStyle(color: AppColors.error, fontSize: 14, fontFamily: 'Lexend'),
+              maxLines: 3,
+            ),
+          ),
+          GestureDetector(
+            onTap: () => setState(() => _errorMsg = null),
+            child: const Icon(Icons.close, color: AppColors.error, size: 18),
+          ),
+        ],
+      ),
+    );
+  }
 
   Widget _buildMicButton() {
-    final (bg, fg, icon) = switch ((_voiceProcessing, _voiceListening,
-        _voiceEnabled)) {
-      (true, _, _) => (
-          Colors.amber.withValues(alpha: 0.85),
-          Colors.black,
-          Icons.hourglass_empty
-        ),
-      (_, true, _) => (
-          Colors.red.withValues(alpha: 0.9),
-          Colors.white,
-          Icons.mic
-        ),
-      (_, _, true) => (
-          Colors.green.withValues(alpha: 0.85),
-          Colors.white,
-          Icons.mic
-        ),
-      _ => (Colors.black54, Colors.white38, Icons.mic_off),
-    };
+    Color bg;
+    Color fg;
+    IconData icon;
+
+    if (_voiceProcessing) {
+      bg = Colors.amber.shade700;
+      fg = Colors.black;
+      icon = Icons.hourglass_empty;
+    } else if (_voiceListening) {
+      bg = AppColors.error;
+      fg = Colors.white;
+      icon = Icons.mic;
+    } else if (_voiceEnabled) {
+      bg = AppColors.primaryContainer;
+      fg = Colors.white;
+      icon = Icons.mic;
+    } else {
+      bg = AppColors.primaryContainer;
+      fg = Colors.white;
+      icon = Icons.mic;
+    }
 
     final btn = GestureDetector(
       onTap: _toggleVoice,
       child: Container(
-        width: 56,
-        height: 56,
+        width: 60,
+        height: 60,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
           color: bg,
-          border: Border.all(
-              color: _voiceListening ? Colors.red : Colors.white24,
-              width: 2),
+          boxShadow: const [BoxShadow(color: Color(0x66000000), blurRadius: 16, offset: Offset(0, 8))],
         ),
-        child: Icon(icon, color: fg, size: 26),
+        child: Icon(icon, color: fg, size: 28),
       ),
     );
 
     if (_voiceListening) {
       return AnimatedBuilder(
         animation: _micScale,
-        builder: (_, child) =>
-            Transform.scale(scale: _micScale.value, child: child),
+        builder: (_, child) => Transform.scale(scale: _micScale.value, child: child),
         child: btn,
       );
     }
     return btn;
-  }
-
-  // ── Voice strip ───────────────────────────────────────────────────────────
-
-  Widget _buildVoiceStrip() {
-    final (bg, text) = switch ((_voiceProcessing, _voiceListening)) {
-      (true, _) => (
-          Colors.amber[900]!,
-          _voiceStatus.isNotEmpty ? _voiceStatus : 'Processing...'
-        ),
-      (_, true) => (
-          Colors.red[900]!,
-          _voicePartial.isNotEmpty ? '"$_voicePartial"' : 'Listening...'
-        ),
-      _ => (
-          Colors.grey[850]!,
-          _voiceStatus.isNotEmpty ? _voiceStatus : 'Tap mic or say a command'
-        ),
-    };
-
-    return Container(
-      color: bg,
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-      child: Row(
-        children: [
-          Icon(
-            _voiceListening ? Icons.graphic_eq : Icons.mic,
-            color: Colors.white70,
-            size: 15,
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(text,
-                style: const TextStyle(
-                    color: Colors.white, fontSize: 13, height: 1.3),
-                maxLines: 2),
-          ),
-          if (!_voiceListening && !_voiceProcessing)
-            GestureDetector(
-              onTap: _startListening,
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: Colors.green.withValues(alpha: 0.25),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                      color: Colors.green.withValues(alpha: 0.5)),
-                ),
-                child: const Text('Speak',
-                    style:
-                        TextStyle(color: Colors.green, fontSize: 12)),
-              ),
-            ),
-        ],
-      ),
-    );
   }
 }

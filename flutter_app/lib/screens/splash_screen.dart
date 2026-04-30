@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../app_theme.dart';
 import '../services/api_service.dart';
 import '../services/radar_service.dart';
 import '../services/depth_service.dart';
@@ -14,7 +15,7 @@ class SplashScreen extends StatefulWidget {
 }
 
 class _SplashScreenState extends State<SplashScreen> {
-  String _status = 'Starting up...';
+  String _status = 'Starting up…';
   bool _connected = false;
   bool _visionReady = false;
 
@@ -31,7 +32,7 @@ class _SplashScreenState extends State<SplashScreen> {
     final url = prefs.getString('backend_url') ?? 'http://localhost:8000';
     ApiService.baseUrl = url;
 
-    setState(() => _status = 'Checking server...');
+    setState(() => _status = 'Checking server…');
     final health = await ApiService.health();
     if (health != null) {
       _connected = true;
@@ -43,7 +44,7 @@ class _SplashScreenState extends State<SplashScreen> {
       setState(() => _status = 'Server not reachable\nConfigure URL in Settings');
     }
 
-    setState(() => _status += '\nDetecting sensors...');
+    setState(() => _status += '\nDetecting sensors…');
     await Future.wait([
       RadarService.detectSensor(),
       DepthService.detectSensor(),
@@ -68,45 +69,70 @@ class _SplashScreenState extends State<SplashScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: AppColors.background,
       body: Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.visibility, color: Colors.green, size: 72),
-            const SizedBox(height: 24),
+            Container(
+              width: 96,
+              height: 96,
+              decoration: BoxDecoration(
+                color: AppColors.primaryContainer,
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color: AppColors.primaryContainer.withValues(alpha: 0.3),
+                    blurRadius: 24,
+                    offset: const Offset(0, 8),
+                  ),
+                ],
+              ),
+              child: const Icon(Icons.visibility, color: Colors.white, size: 48),
+            ),
+            const SizedBox(height: 28),
             const Text(
               'VisionAid',
               style: TextStyle(
-                color: Colors.white,
-                fontSize: 32,
-                fontWeight: FontWeight.bold,
-                letterSpacing: 2,
+                fontFamily: 'PublicSans',
+                color: AppColors.primaryContainer,
+                fontSize: 36,
+                fontWeight: FontWeight.w900,
+                letterSpacing: -0.5,
               ),
             ),
             const SizedBox(height: 6),
             const Text(
               'AI Navigation Assistant',
-              style: TextStyle(color: Colors.white54, fontSize: 15),
-            ),
-            const SizedBox(height: 40),
-            SizedBox(
-              width: 24,
-              height: 24,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                color: _connected
-                    ? (_visionReady ? Colors.green : Colors.amber)
-                    : Colors.white38,
+              style: TextStyle(
+                fontFamily: 'Lexend',
+                color: AppColors.onSurfaceVariant,
+                fontSize: 16,
               ),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 48),
+            SizedBox(
+              width: 28,
+              height: 28,
+              child: CircularProgressIndicator(
+                strokeWidth: 3,
+                color: _connected
+                    ? (_visionReady ? const Color(0xFF2E7D32) : Colors.orange)
+                    : AppColors.primaryContainer,
+              ),
+            ),
+            const SizedBox(height: 20),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 40),
               child: Text(
                 _status,
                 textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.white54, fontSize: 13, height: 1.6),
+                style: const TextStyle(
+                  fontFamily: 'Lexend',
+                  color: AppColors.onSurfaceVariant,
+                  fontSize: 14,
+                  height: 1.6,
+                ),
               ),
             ),
           ],
