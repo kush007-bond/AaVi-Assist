@@ -43,7 +43,7 @@ class _NavigationMapScreenState extends State<NavigationMapScreen>
       vsync: this,
       duration: const Duration(seconds: 1),
     )..repeat(reverse: true);
-    _scan();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _scan());
   }
 
   @override
@@ -117,7 +117,6 @@ class _NavigationMapScreenState extends State<NavigationMapScreen>
     switch (tab) {
       case NavTab.home:
         Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const HomeScreen()));
-      case NavTab.navigate: break;
       case NavTab.roomMap:
         Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => RoomMapScreen(mode: widget.mode)));
       case NavTab.settings:
@@ -140,7 +139,7 @@ class _NavigationMapScreenState extends State<NavigationMapScreen>
           Expanded(flex: 45, child: _buildInstructionsPanel()),
         ],
       ),
-      bottomNavigationBar: AppBottomNavBar(current: NavTab.navigate, onTap: _navigateTo),
+      bottomNavigationBar: AppBottomNavBar(current: NavTab.home, onTap: _navigateTo),
     );
   }
 

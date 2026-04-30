@@ -4,9 +4,11 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../app_theme.dart';
 import '../models/analyse_response.dart';
 import '../services/api_service.dart';
+import '../services/app_state.dart';
 import '../services/camera_service.dart';
 import '../services/room_map_service.dart';
 import '../services/tts_service.dart';
@@ -16,7 +18,6 @@ import '../services/sensor_monitor.dart';
 import '../widgets/floor_plan_painter.dart';
 import '../widgets/bottom_nav_bar.dart';
 import 'settings_screen.dart';
-import 'navigation_map_screen.dart';
 import 'room_map_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -28,28 +29,42 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen>
     with SingleTickerProviderStateMixin {
-  bool _running = false;
-  bool _loading = false;
-  bool _cameraReady = false;
-  String _mode = 'indoor';
-  AnalyseResponse? _lastResult;
-  String? _errorMsg;
-  String _cameraInitMsg = 'Initialising camera…';
+  final _app = AppState.instance;
 
-  bool _realtimeMode = false;
+  // Local-only UI state (doesn't need to survive navigation)
+  AnalyseResponse? _lastResult;
+  String _cameraInitMsg = 'Initialising camera…';
   Timer? _rtFrameTimer;
   bool _rtFrameBusy = false;
   StreamSubscription? _rtSub;
-
-  bool _sensorActive = false;
   SensorAlert? _currentSensorAlert;
   StreamSubscription? _sensorSub;
 
-  bool _voiceEnabled = false;
-  bool _voiceListening = false;
-  bool _voiceProcessing = false;
-  String _voiceStatus = '';
-  String _voicePartial = '';
+  // Convenience getters/setters that read/write AppState
+  bool get _running => _app.running;
+  set _running(bool v) => _app.running = v;
+  bool get _loading => _app.loading;
+  set _loading(bool v) => _app.loading = v;
+  bool get _cameraReady => _app.cameraReady;
+  set _cameraReady(bool v) => _app.cameraReady = v;
+  String get _mode => _app.mode;
+  set _mode(String v) => _app.mode = v;
+  bool get _realtimeMode => _app.realtimeMode;
+  set _realtimeMode(bool v) => _app.realtimeMode = v;
+  String? get _errorMsg => _app.errorMsg;
+  set _errorMsg(String? v) => _app.errorMsg = v;
+  bool get _sensorActive => _app.sensorActive;
+  set _sensorActive(bool v) => _app.sensorActive = v;
+  bool get _voiceEnabled => _app.voiceEnabled;
+  set _voiceEnabled(bool v) => _app.voiceEnabled = v;
+  bool get _voiceListening => _app.voiceListening;
+  set _voiceListening(bool v) => _app.voiceListening = v;
+  bool get _voiceProcessing => _app.voiceProcessing;
+  set _voiceProcessing(bool v) => _app.voiceProcessing = v;
+  String get _voiceStatus => _app.voiceStatus;
+  set _voiceStatus(String v) => _app.voiceStatus = v;
+  String get _voicePartial => _app.voicePartial;
+  set _voicePartial(String v) => _app.voicePartial = v;
 
   late AnimationController _micPulse;
   late Animation<double> _micScale;
@@ -65,33 +80,33 @@ class _HomeScreenState extends State<HomeScreen>
       CurvedAnimation(parent: _micPulse, curve: Curves.easeInOut),
     );
     _micPulse.stop();
+    _app.addListener(_onAppStateChanged);
     _initCamera();
     VoiceService.init();
   }
 
   @override
   void dispose() {
-    _stopAll();
-    if (_sensorActive) {
-      SensorMonitor.stop();
-      _sensorSub?.cancel();
-    }
-    CameraService.dispose();
-    VoiceService.cancel();
+    _app.removeListener(_onAppStateChanged);
+    _rtFrameTimer?.cancel();
+    _rtSub?.cancel();
+    _sensorSub?.cancel();
     _micPulse.dispose();
     super.dispose();
+  }
+
+  void _onAppStateChanged() {
+    if (mounted) setState(() {});
   }
 
   Future<void> _initCamera() async {
     try {
       await CameraService.init();
-      if (mounted) setState(() => _cameraReady = true);
+      if (mounted) _cameraReady = true;
     } catch (e) {
       if (mounted) {
-        setState(() {
-          _cameraInitMsg = 'Camera unavailable: $e\n\nYou can still use the chat bar.';
-          _cameraReady = false;
-        });
+        _cameraInitMsg = 'Camera unavailable: $e\n\nYou can still use the chat bar.';
+        _cameraReady = false;
       }
     }
   }
@@ -105,21 +120,27 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   void _startAll() {
-    setState(() {
-      _running = true;
-      _loading = !_realtimeMode;
-      _errorMsg = null;
-    });
+    _running = true;
+    _loading = !_realtimeMode;
+    _errorMsg = null;
     if (_realtimeMode) {
       _startRealtimeFrames();
     } else {
       CameraService.start(
         _mode,
         onResult: (result) {
-          if (mounted) setState(() { _lastResult = result; _loading = false; _errorMsg = null; });
+          if (mounted) {
+            _lastResult = result;
+            _loading = false;
+            _errorMsg = null;
+            setState(() {}); // for _lastResult which is local
+          }
         },
         onError: (err) {
-          if (mounted) setState(() { _loading = false; _errorMsg = err; });
+          if (mounted) {
+            _loading = false;
+            _errorMsg = err;
+          }
         },
       );
     }
@@ -130,11 +151,12 @@ class _HomeScreenState extends State<HomeScreen>
       SensorMonitor.stop();
       _sensorSub?.cancel();
       _sensorSub = null;
-      setState(() { _sensorActive = false; _currentSensorAlert = null; });
+      _sensorActive = false;
+      setState(() => _currentSensorAlert = null);
     } else {
       SensorMonitor.start();
       _sensorSub = SensorMonitor.alerts.listen(_onSensorAlert);
-      setState(() => _sensorActive = true);
+      _sensorActive = true;
     }
   }
 
@@ -148,12 +170,16 @@ class _HomeScreenState extends State<HomeScreen>
     } else {
       CameraService.stop();
     }
-    if (mounted) setState(() { _running = false; _loading = false; });
+    _running = false;
+    _loading = false;
   }
 
   void _toggleMode() {
-    if (_running) _stopAll();
-    setState(() => _mode = _mode == 'indoor' ? 'outdoor' : 'indoor');
+    final wasRunning = _running;
+    if (wasRunning) _stopAll();
+    _app.toggleMode();
+    // Auto-restart in new mode if it was running
+    if (wasRunning) _startAll();
   }
 
   Future<void> _switchToRealtimeMode(bool on) async {
@@ -162,7 +188,7 @@ class _HomeScreenState extends State<HomeScreen>
     if (on) {
       await RealtimeService.connect(ApiService.baseUrl);
       if (!RealtimeService.isConnected) {
-        setState(() => _errorMsg = 'WebSocket failed. Check backend URL in Settings.');
+        _errorMsg = 'WebSocket failed. Check backend URL in Settings.';
         return;
       }
       await TtsService.speak('Real-time mode on.');
@@ -170,7 +196,7 @@ class _HomeScreenState extends State<HomeScreen>
       RealtimeService.disconnect();
       await TtsService.speak('Real-time mode off.');
     }
-    setState(() => _realtimeMode = on);
+    _realtimeMode = on;
   }
 
   void _startRealtimeFrames() {
@@ -202,25 +228,28 @@ class _HomeScreenState extends State<HomeScreen>
           if (result.textDetected != null && result.textDetected!.trim().isNotEmpty && result.textDetected!.toLowerCase() != 'null') {
             Future.delayed(const Duration(milliseconds: 800), () => TtsService.speak('I can see text: ${result.textDetected}'));
           }
-          setState(() { _lastResult = result; _loading = false; });
+          _loading = false;
+          setState(() { _lastResult = result; });
         } catch (_) { _rtFrameBusy = false; }
 
       case 'snapshot_result':
         _voiceProcessing = false;
         final answer = msg['answer'] as String? ?? 'No answer available.';
         TtsService.speak(answer);
-        setState(() { _voiceStatus = answer.length > 60 ? '${answer.substring(0, 57)}...' : answer; });
+        _voiceStatus = answer.length > 60 ? '${answer.substring(0, 57)}...' : answer;
         if (_voiceEnabled) Future.delayed(const Duration(milliseconds: 800), _startListening);
 
       case 'skipped':
         _rtFrameBusy = false;
 
       case 'disconnected':
-        setState(() { _realtimeMode = false; _running = false; _errorMsg = 'Real-time connection lost. Tap ⚡ to reconnect.'; });
+        _realtimeMode = false;
+        _running = false;
+        _errorMsg = 'Real-time connection lost. Tap ⚡ to reconnect.';
 
       case 'error':
         _rtFrameBusy = false;
-        setState(() => _errorMsg = msg['message'] as String? ?? 'RT error');
+        _errorMsg = msg['message'] as String? ?? 'RT error';
     }
   }
 
@@ -231,80 +260,134 @@ class _HomeScreenState extends State<HomeScreen>
   void _toggleVoice() async {
     if (_voiceListening || _voiceEnabled) {
       await VoiceService.stop();
+      await TtsService.stop();
       _micPulse.stop();
-      setState(() { _voiceListening = false; _voiceEnabled = false; _voiceStatus = ''; _voicePartial = ''; });
+      _voiceListening = false;
+      _voiceEnabled = false;
+      _voiceStatus = '';
+      _voicePartial = '';
       await TtsService.speak('Voice off.');
     } else {
       if (!VoiceService.isAvailable) {
         final ok = await VoiceService.init();
-        if (!ok) { setState(() => _errorMsg = 'Speech recognition unavailable on this device.'); return; }
+        if (!ok) { _errorMsg = 'Speech recognition unavailable on this device.'; return; }
       }
-      setState(() => _voiceEnabled = true);
+      _voiceEnabled = true;
       await TtsService.speak('Voice on.');
-      await Future.delayed(const Duration(milliseconds: 600));
+      // TTS speak now awaits completion, so mic opens cleanly after
       _startListening();
     }
   }
 
-  void _startListening() {
+  void _startListening() async {
     if (!_voiceEnabled || _voiceListening || _voiceProcessing) return;
-    setState(() { _voiceListening = true; _voiceStatus = 'Listening...'; _voicePartial = ''; });
+
+    // Stop TTS if it's still speaking — VoiceService.startListening also does
+    // this, but we set UI state first
+    if (TtsService.isSpeaking) {
+      await TtsService.stop();
+    }
+
+    _voiceListening = true;
+    _voiceStatus = 'Listening...';
+    _voicePartial = '';
     _micPulse.repeat(reverse: true);
     VoiceService.startListening(
-      onPartial: (w) { if (mounted) setState(() => _voicePartial = w); },
+      onPartial: (w) { if (mounted) _voicePartial = w; },
       onFinal: (w) {
         _micPulse.stop();
-        if (mounted) setState(() => _voiceListening = false);
+        _voiceListening = false;
         _handleVoiceResult(w);
       },
       onDone: () {
         _micPulse.stop();
-        if (mounted) setState(() { _voiceListening = false; if (_voicePartial.isEmpty) _voiceStatus = 'Tap mic to speak'; });
-        if (_voiceEnabled && !_voiceProcessing) Future.delayed(const Duration(milliseconds: 300), _startListening);
+        _voiceListening = false;
+        if (_voicePartial.isEmpty) _voiceStatus = 'Tap mic to speak';
+        if (_voiceEnabled && !_voiceProcessing) _scheduleRelisten();
       },
     );
   }
 
+  /// Wait for TTS to finish, then re-open the mic.
+  void _scheduleRelisten() {
+    // Small delay so TTS completion callbacks settle
+    Future.delayed(const Duration(milliseconds: 400), () {
+      if (!mounted || !_voiceEnabled || _voiceProcessing) return;
+      _startListening();
+    });
+  }
+
   void _handleVoiceResult(String words) async {
-    if (words.trim().isEmpty) return;
+    if (words.trim().isEmpty) {
+      if (_voiceEnabled) _scheduleRelisten();
+      return;
+    }
     final (cmd, question) = VoiceService.parseCommand(words);
     switch (cmd) {
       case VoiceCommand.start:
-        setState(() => _voiceStatus = 'Starting...');
+        _voiceStatus = 'Starting...';
         await TtsService.speak('Starting.');
         if (!_running) _startAll();
       case VoiceCommand.stop:
-        setState(() => _voiceStatus = 'Stopping...');
+        _voiceStatus = 'Stopping...';
         await TtsService.speak('Stopping.');
         if (_running) _stopAll();
       case VoiceCommand.indoor:
-        setState(() => _voiceStatus = 'Indoor mode.');
-        await TtsService.speak('Indoor mode.');
+        _voiceStatus = 'Indoor mode.';
+        await TtsService.speak('Switching to indoor mode.');
         if (_mode != 'indoor') _toggleMode();
       case VoiceCommand.outdoor:
-        setState(() => _voiceStatus = 'Outdoor mode.');
-        await TtsService.speak('Outdoor mode.');
+        _voiceStatus = 'Outdoor mode.';
+        await TtsService.speak('Switching to outdoor mode.');
         if (_mode != 'outdoor') _toggleMode();
       case VoiceCommand.openMap:
-        setState(() => _voiceStatus = 'Opening room map...');
+        _voiceStatus = 'Opening room map...';
         await TtsService.speak('Opening room map.');
         if (mounted) Navigator.push(context, MaterialPageRoute(builder: (_) => RoomMapScreen(mode: _mode)));
+      case VoiceCommand.navigate:
+        _voiceStatus = 'Opening navigation...';
+        await TtsService.speak('Opening navigation.');
+      case VoiceCommand.settings:
+        _voiceStatus = 'Opening settings...';
+        await TtsService.speak('Opening settings.');
+        if (mounted) Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen()));
+      case VoiceCommand.help:
+        _voiceStatus = VoiceService.helpText;
+        await TtsService.speak(VoiceService.helpText);
+      case VoiceCommand.status:
+        final statusMsg = _running
+            ? 'Navigation is running in $_mode mode.'
+            : 'Navigation is stopped. Say start to begin.';
+        _voiceStatus = statusMsg;
+        await TtsService.speak(statusMsg);
+      case VoiceCommand.repeat:
+        if (TtsService.lastSpoken.isNotEmpty) {
+          await TtsService.speak(TtsService.lastSpoken);
+        } else {
+          await TtsService.speak('Nothing to repeat.');
+        }
+      case VoiceCommand.emergency:
+        _voiceStatus = 'Calling emergency...';
+        await TtsService.speak('Calling emergency services.');
+        _callEmergency();
       case VoiceCommand.question:
-        setState(() { _voiceStatus = question ?? words; _voiceProcessing = true; });
+        _voiceStatus = question ?? words;
+        _voiceProcessing = true;
         await TtsService.speak('Let me look...');
         await _takeSnapshot(question ?? words);
       case VoiceCommand.none:
-        if (_voiceEnabled) Future.delayed(const Duration(milliseconds: 300), _startListening);
+        if (_voiceEnabled) _scheduleRelisten();
     }
+    // TTS.speak now awaits completion, so it's safe to re-listen immediately
     if (cmd != VoiceCommand.question && cmd != VoiceCommand.none && _voiceEnabled) {
-      Future.delayed(const Duration(milliseconds: 800), _startListening);
+      _scheduleRelisten();
     }
   }
 
   Future<void> _takeSnapshot(String question) async {
     if (!_cameraReady || CameraService.controller == null) {
       await TtsService.speak('Camera not ready.');
-      setState(() => _voiceProcessing = false);
+      _voiceProcessing = false;
       if (_voiceEnabled) Future.delayed(const Duration(milliseconds: 800), _startListening);
       return;
     }
@@ -319,12 +402,13 @@ class _HomeScreenState extends State<HomeScreen>
         final ctx = analyse?.description ?? '';
         final answer = ctx.isNotEmpty ? (await ApiService.chat([], context: '$ctx\nUser asked: $question') ?? ctx) : 'I could not see anything clearly.';
         await TtsService.speak(answer);
-        if (mounted) setState(() { _voiceStatus = answer.length > 60 ? '${answer.substring(0, 57)}...' : answer; _voiceProcessing = false; });
+        _voiceStatus = answer.length > 60 ? '${answer.substring(0, 57)}...' : answer;
+        _voiceProcessing = false;
         if (_voiceEnabled) Future.delayed(const Duration(milliseconds: 600), _startListening);
       }
     } catch (e) {
       await TtsService.speak('Could not capture image.');
-      setState(() => _voiceProcessing = false);
+      _voiceProcessing = false;
       if (_voiceEnabled) Future.delayed(const Duration(milliseconds: 800), _startListening);
     }
   }
@@ -332,12 +416,34 @@ class _HomeScreenState extends State<HomeScreen>
   void _navigateTo(NavTab tab) {
     switch (tab) {
       case NavTab.home: break;
-      case NavTab.navigate:
-        Navigator.push(context, MaterialPageRoute(builder: (_) => NavigationMapScreen(mode: _mode)));
       case NavTab.roomMap:
         Navigator.push(context, MaterialPageRoute(builder: (_) => RoomMapScreen(mode: _mode))).then((_) => setState(() {}));
       case NavTab.settings:
         Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen()));
+    }
+  }
+
+  Future<void> _callEmergency() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Emergency Call', style: TextStyle(fontFamily: 'Lexend', fontWeight: FontWeight.w700)),
+        content: const Text('Call emergency services (112)?', style: TextStyle(fontFamily: 'Lexend')),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.error, foregroundColor: Colors.white),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('CALL NOW', style: TextStyle(fontFamily: 'PublicSans', fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      final uri = Uri(scheme: 'tel', path: '112');
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri);
+      }
     }
   }
 
@@ -350,11 +456,15 @@ class _HomeScreenState extends State<HomeScreen>
       appBar: _buildAppBar(),
       body: Column(
         children: [
-          // Camera view
-          _buildCameraSection(),
+          // Camera view — flexible so it shrinks on small screens
+          Flexible(
+            flex: 3,
+            child: _buildCameraSection(),
+          ),
 
           // Sensor & status area
           Expanded(
+            flex: 4,
             child: Container(
               decoration: const BoxDecoration(
                 color: AppColors.surfaceContainerLowest,
@@ -397,9 +507,9 @@ class _HomeScreenState extends State<HomeScreen>
       title: const Text('VisionAid'),
       actions: [
         IconButton(
-          icon: const Icon(Icons.sos_outlined, color: AppColors.primaryContainer),
-          onPressed: () {},
-          tooltip: 'Emergency',
+          icon: const Icon(Icons.sos, color: AppColors.error),
+          onPressed: _callEmergency,
+          tooltip: 'Emergency Call',
         ),
       ],
       bottom: PreferredSize(
@@ -658,9 +768,9 @@ class _HomeScreenState extends State<HomeScreen>
                     m[0].toUpperCase() + m.substring(1),
                     style: TextStyle(
                       fontFamily: 'Lexend',
-                      fontSize: 14,
+                      fontSize: 12,
                       fontWeight: FontWeight.w600,
-                      letterSpacing: 0.5,
+                      letterSpacing: 0.3,
                       color: active ? AppColors.primaryContainer : AppColors.onSurfaceVariant,
                     ),
                   ),
@@ -689,7 +799,7 @@ class _HomeScreenState extends State<HomeScreen>
                 _running ? 'STOP' : 'START NAV',
                 style: const TextStyle(
                   fontFamily: 'PublicSans',
-                  fontSize: 18,
+                  fontSize: 14,
                   fontWeight: FontWeight.w700,
                 ),
               ),
@@ -753,7 +863,7 @@ class _HomeScreenState extends State<HomeScreen>
             ),
           ),
           GestureDetector(
-            onTap: () => setState(() => _errorMsg = null),
+            onTap: () => _errorMsg = null,
             child: const Icon(Icons.close, color: AppColors.error, size: 18),
           ),
         ],

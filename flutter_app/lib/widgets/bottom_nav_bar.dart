@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import '../app_theme.dart';
 
-enum NavTab { home, navigate, roomMap, settings }
+enum NavTab { home, roomMap, settings }
 
 class AppBottomNavBar extends StatelessWidget {
   final NavTab current;
@@ -38,13 +38,6 @@ class AppBottomNavBar extends StatelessWidget {
             label: 'HOME',
             active: current == NavTab.home,
             onTap: () => onTap(NavTab.home),
-          ),
-          _NavItem(
-            icon: Icons.explore_outlined,
-            filledIcon: Icons.explore,
-            label: 'NAVIGATE',
-            active: current == NavTab.navigate,
-            onTap: () => onTap(NavTab.navigate),
           ),
           _NavItem(
             icon: Icons.layers_outlined,

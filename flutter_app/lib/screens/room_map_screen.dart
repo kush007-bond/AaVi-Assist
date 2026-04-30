@@ -13,7 +13,6 @@ import '../services/tts_service.dart';
 import '../widgets/floor_plan_painter.dart';
 import '../widgets/bottom_nav_bar.dart';
 import 'home_screen.dart';
-import 'navigation_map_screen.dart';
 import 'settings_screen.dart';
 
 class RoomMapScreen extends StatefulWidget {
@@ -88,8 +87,6 @@ class _RoomMapScreenState extends State<RoomMapScreen> {
     switch (tab) {
       case NavTab.home:
         Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const HomeScreen()));
-      case NavTab.navigate:
-        Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => NavigationMapScreen(mode: widget.mode)));
       case NavTab.roomMap: break;
       case NavTab.settings:
         Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen()));
@@ -361,33 +358,38 @@ class _RoomMapScreenState extends State<RoomMapScreen> {
                       ? [BoxShadow(color: Colors.orange.withValues(alpha: 0.2), blurRadius: 12)]
                       : null,
                 ),
-                child: Opacity(
-                  opacity: isPending ? 0.5 : 1.0,
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      if (isDone)
-                        const Icon(Icons.check_circle, color: Color(0xFF2E7D32), size: 20)
-                      else if (isNext)
-                        const Icon(Icons.radio_button_unchecked, color: Colors.orange, size: 18),
-                      const SizedBox(height: 4),
-                      Icon(
-                        icons[i],
-                        size: 28,
-                        color: isNext ? Colors.orange : (isDone ? AppColors.onSurface : AppColors.onSurfaceVariant),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        isNext ? '${directions[i]}\n(Next)' : directions[i],
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          fontFamily: 'Lexend',
-                          fontSize: 10,
-                          fontWeight: isNext ? FontWeight.w700 : FontWeight.w400,
-                          color: isNext ? Colors.orange.shade800 : AppColors.onSurfaceVariant,
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Opacity(
+                    opacity: isPending ? 0.5 : 1.0,
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (isDone)
+                          const Icon(Icons.check_circle, color: Color(0xFF2E7D32), size: 16)
+                        else if (isNext)
+                          const Icon(Icons.radio_button_unchecked, color: Colors.orange, size: 14),
+                        const SizedBox(height: 2),
+                        Icon(
+                          icons[i],
+                          size: 24,
+                          color: isNext ? Colors.orange : (isDone ? AppColors.onSurface : AppColors.onSurfaceVariant),
                         ),
-                      ),
-                    ],
+                        const SizedBox(height: 2),
+                        Text(
+                          isNext ? '${directions[i]}\n(Next)' : directions[i],
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontFamily: 'Lexend',
+                            fontSize: 9,
+                            height: 1.1,
+                            fontWeight: isNext ? FontWeight.w700 : FontWeight.w400,
+                            color: isNext ? Colors.orange.shade800 : AppColors.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               );

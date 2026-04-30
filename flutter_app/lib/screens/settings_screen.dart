@@ -4,7 +4,6 @@ import '../app_theme.dart';
 import '../services/api_service.dart';
 import '../widgets/bottom_nav_bar.dart';
 import 'home_screen.dart';
-import 'navigation_map_screen.dart';
 import 'room_map_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -86,8 +85,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     switch (tab) {
       case NavTab.home:
         Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const HomeScreen()));
-      case NavTab.navigate:
-        Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => NavigationMapScreen(mode: 'indoor')));
       case NavTab.roomMap:
         Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => RoomMapScreen(mode: 'indoor')));
       case NavTab.settings: break;
