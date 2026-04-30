@@ -163,7 +163,7 @@ class _RoomMapScreenState extends State<RoomMapScreen> {
         icon: const Icon(Icons.visibility, color: AppColors.primaryContainer),
         onPressed: () => Navigator.pop(context),
       ),
-      title: const Text('VisionAid'),
+      title: const Text('AaVi'),
       actions: [
         IconButton(
           icon: const Icon(Icons.sos_outlined, color: AppColors.primaryContainer),

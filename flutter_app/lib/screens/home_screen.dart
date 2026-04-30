@@ -1,3 +1,5 @@
+// ignore_for_file: unused_element
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -499,12 +501,14 @@ class _HomeScreenState extends State<HomeScreen>
 
   AppBar _buildAppBar() {
     return AppBar(
-      leading: IconButton(
-        icon: const Icon(Icons.visibility, color: AppColors.primaryContainer),
-        onPressed: () => _switchToRealtimeMode(!_realtimeMode),
-        tooltip: _realtimeMode ? 'Disable real-time AI' : 'Enable real-time AI',
+      leading: Padding(
+        padding: const EdgeInsets.all(8),
+        child: GestureDetector(
+          onTap: () => _switchToRealtimeMode(!_realtimeMode),
+          child: Image.asset('assests/logo.png', width: 36, height: 36),
+        ),
       ),
-      title: const Text('VisionAid'),
+      title: const Text('AaVi'),
       actions: [
         IconButton(
           icon: const Icon(Icons.sos, color: AppColors.error),

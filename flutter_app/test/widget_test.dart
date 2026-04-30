@@ -10,7 +10,7 @@ import 'package:flutter_app/main.dart';
 
 void main() {
   testWidgets('App smoke test', (WidgetTester tester) async {
-    await tester.pumpWidget(const VisionAidApp());
-    expect(find.byType(VisionAidApp), findsOneWidget);
+    await tester.pumpWidget(const AaViApp());
+    expect(find.byType(AaViApp), findsOneWidget);
   });
 }

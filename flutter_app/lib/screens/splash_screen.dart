@@ -75,10 +75,9 @@ class _SplashScreenState extends State<SplashScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              width: 96,
-              height: 96,
+              width: 120,
+              height: 120,
               decoration: BoxDecoration(
-                color: AppColors.primaryContainer,
                 shape: BoxShape.circle,
                 boxShadow: [
                   BoxShadow(
@@ -88,11 +87,18 @@ class _SplashScreenState extends State<SplashScreen> {
                   ),
                 ],
               ),
-              child: const Icon(Icons.visibility, color: Colors.white, size: 48),
+              child: ClipOval(
+                child: Image.asset(
+                  'assests/logo.png',
+                  width: 120,
+                  height: 120,
+                  fit: BoxFit.cover,
+                ),
+              ),
             ),
             const SizedBox(height: 28),
             const Text(
-              'VisionAid',
+              'AaVi',
               style: TextStyle(
                 fontFamily: 'PublicSans',
                 color: AppColors.primaryContainer,

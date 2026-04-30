@@ -11,16 +11,16 @@ void main() async {
   if (savedUrl != null && savedUrl.isNotEmpty) {
     ApiService.baseUrl = savedUrl;
   }
-  runApp(const VisionAidApp());
+  runApp(const AaViApp());
 }
 
-class VisionAidApp extends StatelessWidget {
-  const VisionAidApp({super.key});
+class AaViApp extends StatelessWidget {
+  const AaViApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'VisionAid',
+      title: 'AaVi',
       debugShowCheckedModeBanner: false,
       theme: buildAppTheme(),
       home: const SplashScreen(),
